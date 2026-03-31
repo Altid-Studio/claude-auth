@@ -1,0 +1,170 @@
+import fs from "fs";
+import path from "path";
+const CLAUDE_DIR = "/root/.claude";
+const CREDENTIALS_PATH = path.join(CLAUDE_DIR, ".credentials.json");
+const DEFAULT_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+let config = null;
+let refreshTimer = null;
+/**
+ * Initialize claude-auth. Call once at service boot.
+ * Fetches credentials from studio-runner and writes to disk.
+ * Returns true if credentials are available (fetched or cached).
+ */
+export async function setup(opts) {
+    config = opts;
+    const credsPath = opts.credentialsPath || CREDENTIALS_PATH;
+    const credsDir = path.dirname(credsPath);
+    if (!fs.existsSync(credsDir)) {
+        fs.mkdirSync(credsDir, { recursive: true });
+    }
+    // Try to fetch fresh credentials from studio-runner
+    const fetched = await fetchCredentials();
+    if (fetched) {
+        console.log(`[claude-auth] ${opts.serviceName}: credentials fetched from token service`);
+        return true;
+    }
+    // Fallback: use cached credentials from volume
+    if (fs.existsSync(credsPath)) {
+        console.log(`[claude-auth] ${opts.serviceName}: using cached credentials from volume`);
+        return true;
+    }
+    console.error(`[claude-auth] ${opts.serviceName}: no credentials available`);
+    return false;
+}
+/**
+ * Start auto-refresh timer. Call after setup().
+ * Fetches fresh credentials from studio-runner periodically.
+ */
+export function startAutoRefresh() {
+    if (!config)
+        throw new Error("[claude-auth] Call setup() before startAutoRefresh()");
+    if (refreshTimer)
+        clearInterval(refreshTimer);
+    const intervalMs = config.refreshIntervalMs || DEFAULT_REFRESH_INTERVAL_MS;
+    refreshTimer = setInterval(async () => {
+        console.log(`[claude-auth] ${config.serviceName}: refreshing credentials...`);
+        const ok = await fetchCredentials();
+        if (!ok) {
+            console.error(`[claude-auth] ${config.serviceName}: refresh failed`);
+        }
+    }, intervalMs);
+}
+/**
+ * Stop auto-refresh timer.
+ */
+export function stopAutoRefresh() {
+    if (refreshTimer) {
+        clearInterval(refreshTimer);
+        refreshTimer = null;
+    }
+}
+/**
+ * Get the current access token from disk.
+ * Returns null if no credentials available.
+ */
+export function getAccessToken() {
+    const credsPath = config?.credentialsPath || CREDENTIALS_PATH;
+    try {
+        if (!fs.existsSync(credsPath))
+            return null;
+        const creds = JSON.parse(fs.readFileSync(credsPath, "utf-8"));
+        return creds.claudeAiOauth?.accessToken || null;
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * Check if credentials exist on disk.
+ */
+export function hasCredentials() {
+    const credsPath = config?.credentialsPath || CREDENTIALS_PATH;
+    try {
+        if (!fs.existsSync(credsPath))
+            return false;
+        const creds = JSON.parse(fs.readFileSync(credsPath, "utf-8"));
+        return !!creds.claudeAiOauth?.accessToken;
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * Manually write credentials to disk (for setup endpoints).
+ */
+export function writeCredentials(base64) {
+    const credsPath = config?.credentialsPath || CREDENTIALS_PATH;
+    const credsDir = path.dirname(credsPath);
+    try {
+        const decoded = Buffer.from(base64, "base64").toString("utf-8");
+        const parsed = JSON.parse(decoded);
+        if (!parsed.claudeAiOauth)
+            throw new Error("Invalid credentials format");
+        if (!fs.existsSync(credsDir))
+            fs.mkdirSync(credsDir, { recursive: true });
+        fs.writeFileSync(credsPath, decoded, { mode: 0o600 });
+        console.log(`[claude-auth] Credentials written via writeCredentials()`);
+        return true;
+    }
+    catch (error) {
+        console.error(`[claude-auth] writeCredentials failed:`, error);
+        return false;
+    }
+}
+// --- Internal ---
+async function fetchCredentials() {
+    if (!config)
+        return false;
+    try {
+        const response = await fetch(`${config.tokenServiceUrl}/api/claude-credentials`, {
+            method: "GET",
+            headers: {
+                "X-Admin-Key": config.adminKey,
+            },
+            signal: AbortSignal.timeout(10_000),
+        });
+        if (!response.ok) {
+            const text = await response.text();
+            console.error(`[claude-auth] ${config.serviceName}: fetch failed: ${response.status} ${text}`);
+            await alertFailure(`Token service returned ${response.status}: ${text}`);
+            return false;
+        }
+        const data = await response.json();
+        // Write full credentials object to disk (SDK reads from here)
+        const credsPath = config.credentialsPath || CREDENTIALS_PATH;
+        const credsDir = path.dirname(credsPath);
+        if (!fs.existsSync(credsDir))
+            fs.mkdirSync(credsDir, { recursive: true });
+        fs.writeFileSync(credsPath, JSON.stringify({ claudeAiOauth: data.claudeAiOauth }), { mode: 0o600 });
+        console.log(`[claude-auth] ${config.serviceName}: credentials written, expires: ${data.expiresAt}`);
+        return true;
+    }
+    catch (error) {
+        console.error(`[claude-auth] ${config.serviceName}: fetch error:`, error);
+        await alertFailure(`Fetch error: ${error}`);
+        return false;
+    }
+}
+async function alertFailure(reason) {
+    if (!config?.slackAgentUrl)
+        return;
+    try {
+        await fetch(`${config.slackAgentUrl}/notify`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                ...(config.slackPostToken
+                    ? { Authorization: `Bearer ${config.slackPostToken}` }
+                    : {}),
+            },
+            body: JSON.stringify({
+                target: "niklas",
+                message: `⚠️ *${config.serviceName}*: Kunne ikke hente Claude credentials fra token service.\nGrund: ${reason}`,
+                type: "dm",
+            }),
+        });
+    }
+    catch {
+        // Silent — don't fail on alert failure
+    }
+}
