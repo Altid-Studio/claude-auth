@@ -1,0 +1,25 @@
+{
+  "name": "@altid-studio/claude-auth",
+  "version": "1.0.0",
+  "description": "Central Claude Max subscription credential management for Altid Studio Railway services",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "claude",
+    "auth",
+    "altid-studio"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.7.0"
+  }
+}
