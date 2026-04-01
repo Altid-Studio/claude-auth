@@ -136,6 +136,33 @@ export function writeCredentials(base64: string): boolean {
   }
 }
 
+/**
+ * Register a /api/refresh-credentials endpoint on a Fastify instance.
+ * When called, fetches fresh credentials from the token service.
+ * Requires setup() to have been called first.
+ */
+export function registerRefreshEndpoint(app: any): void {
+  app.post("/api/refresh-credentials", async (req: any, reply: any) => {
+    if (!config) {
+      return reply.code(500).send({ error: "claude-auth not initialized" });
+    }
+
+    // Verify the request comes from studio-runner (simple shared secret)
+    const providedKey = req.headers["x-admin-key"];
+    if (config.adminKey && providedKey !== config.adminKey) {
+      return reply.code(401).send({ error: "Invalid admin key" });
+    }
+
+    console.log(`[claude-auth] ${config.serviceName}: refresh triggered by token service`);
+    const ok = await fetchCredentials();
+    if (ok) {
+      return reply.send({ status: "ok", message: "Credentials refreshed" });
+    } else {
+      return reply.code(500).send({ error: "Failed to fetch credentials" });
+    }
+  });
+}
+
 // --- Internal ---
 
 async function fetchCredentials(): Promise<boolean> {

@@ -42,4 +42,10 @@ export declare function hasCredentials(): boolean;
  * Manually write credentials to disk (for setup endpoints).
  */
 export declare function writeCredentials(base64: string): boolean;
+/**
+ * Register a /api/refresh-credentials endpoint on a Fastify instance.
+ * When called, fetches fresh credentials from the token service.
+ * Requires setup() to have been called first.
+ */
+export declare function registerRefreshEndpoint(app: any): void;
 export {};
