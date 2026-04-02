@@ -3,14 +3,8 @@ interface ClaudeAuthConfig {
     tokenServiceUrl: string;
     /** Admin API key for studio-runner */
     adminKey: string;
-    /** Service name for logging (e.g. "shadow-haiku") */
+    /** Service name for logging (e.g. "knowledge-agent") */
     serviceName: string;
-    /** Optional: Slack agent URL for alerts on failure */
-    slackAgentUrl?: string;
-    /** Optional: Slack post token for auth */
-    slackPostToken?: string;
-    /** Optional: refresh interval in ms (default: 6 hours) */
-    refreshIntervalMs?: number;
     /** Optional: custom credentials path (default: /root/.claude/.credentials.json) */
     credentialsPath?: string;
 }
@@ -21,31 +15,33 @@ interface ClaudeAuthConfig {
  */
 export declare function setup(opts: ClaudeAuthConfig): Promise<boolean>;
 /**
- * Start auto-refresh timer. Call after setup().
- * Fetches fresh credentials from studio-runner periodically.
- */
-export declare function startAutoRefresh(): void;
-/**
- * Stop auto-refresh timer.
- */
-export declare function stopAutoRefresh(): void;
-/**
- * Get the current access token from disk.
- * Returns null if no credentials available.
+ * Get the current access token.
+ * Priority: override > shared credentials
  */
 export declare function getAccessToken(): string | null;
 /**
- * Check if credentials exist on disk.
+ * Check if credentials exist (override or shared).
  */
 export declare function hasCredentials(): boolean;
 /**
- * Manually write credentials to disk (for setup endpoints).
+ * Register all credential endpoints on a Fastify instance:
+ *
+ * - POST /api/refresh-credentials  — receive push from studio-runner
+ * - POST /api/claude-override      — set a local test token
+ * - DELETE /api/claude-override     — remove override, fetch shared token
+ * - GET /api/claude-status          — show current credential state
  */
-export declare function writeCredentials(base64: string): boolean;
+export declare function registerEndpoints(app: any): void;
 /**
- * Register a /api/refresh-credentials endpoint on a Fastify instance.
- * When called, fetches fresh credentials from the token service.
- * Requires setup() to have been called first.
+ * @deprecated Use registerEndpoints() instead. Kept for backwards compatibility.
  */
 export declare function registerRefreshEndpoint(app: any): void;
+/**
+ * @deprecated No longer needed — push model only. This is a no-op.
+ */
+export declare function startAutoRefresh(): void;
+/**
+ * @deprecated No longer needed.
+ */
+export declare function stopAutoRefresh(): void;
 export {};
